@@ -3,6 +3,10 @@ package br.ufc.mdcc.distributedmutualexclusion.entities;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.Map;
+import java.util.Map.Entry;
+
+import org.jgroups.Address;
 
 public class Event {
 	
@@ -26,13 +30,28 @@ public class Event {
 		in = new BufferedReader(new InputStreamReader(System.in));
 	}
 	
-	private  int getOption() throws IOException{
+	private int getOption() throws IOException{
+		
+		System.out.println("-------------------");
+		System.out.println(">>> "+process.getName());
+		System.out.println("-------------------");
+		
 		for (String string : OPTIONS) {
 			System.out.println(string);
 		}
 		
 		String s = in.readLine();
 		return Integer.parseInt(s);
+	}
+	
+	private void showRequestsQueue(){
+		Map<String, Address> queue =  process.getRequestsQueue();
+		
+		for(Entry<String, Address> pair : queue.entrySet()){
+			
+			System.out.println("[ "+pair.getKey()+" ] "+pair.getValue());
+			
+		}
 	}
 	
 	private void processOption(int opt) throws Exception{
@@ -42,7 +61,7 @@ public class Event {
 			break;
 		
 		case REQUEST_QUEUE_RESQUESTS:
-						
+			showRequestsQueue();
 			break;
 		
 		case SEE_STATE:

@@ -1,18 +1,25 @@
 package br.ufc.mdcc.distributedmutualexclusion.entities;
 
-import java.util.ArrayList;
+import static br.ufc.mdcc.distributedmutualexclusion.enums.State.HELD;
+import static br.ufc.mdcc.distributedmutualexclusion.enums.State.RELEASED;
+import static br.ufc.mdcc.distributedmutualexclusion.enums.State.WANTED;
+import static br.ufc.mdcc.distributedmutualexclusion.enums.TypeMessage.OK;
+import static br.ufc.mdcc.distributedmutualexclusion.enums.TypeMessage.REQUEST_IN_CR;
+
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+
 import org.jgroups.Address;
 import org.jgroups.JChannel;
 import org.jgroups.Message;
 import org.jgroups.ReceiverAdapter;
 import org.jgroups.View;
+
 import br.ufc.mdcc.distributedmutualexclusion.enums.State;
 import br.ufc.mdcc.distributedmutualexclusion.enums.TypeMessage;
 import br.ufc.mdcc.distributedmutualexclusion.listeners.AccessCriticalRegionFinishedListener;
-
-import static br.ufc.mdcc.distributedmutualexclusion.enums.State.*;
-import static br.ufc.mdcc.distributedmutualexclusion.enums.TypeMessage.*;
 
 public class Process extends ReceiverAdapter implements AccessCriticalRegionFinishedListener{
 
@@ -20,8 +27,9 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 	private JChannel channel;
 	private State state;
 	private int lamport;
-	private List<Address> requestsQueue;
-	private List<Address> othersMenbers;
+	private Map<String, Address> requestsQueue;
+	private List<Address> allAtCluster;
+	private Map<Address, Boolean> processAcceptedAcess;
 	
 	public Process(String name, String channel) throws Exception{
 		this.name = name;
@@ -30,8 +38,9 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 		this.channel.setReceiver(this);
 		this.state = RELEASED;
 		lamport = 0;
-		requestsQueue = new ArrayList<Address>();
-		othersMenbers = new ArrayList<Address>();
+		requestsQueue = new HashMap<String, Address>();
+		allAtCluster = this.channel.getView().getMembers();
+		processAcceptedAcess = new HashMap<Address, Boolean>();
 	}
 	
 	public void start() throws Exception{
@@ -51,23 +60,67 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 
 	public void viewAccepted(View view) {
 		updateLamport();
-		othersMenbers.clear();
-		othersMenbers = view.getMembers();
+		List<Address> previousMenbenrs = allAtCluster;
+		allAtCluster = view.getMembers();
+		if(state == WANTED)
+			processChangeAtCluster(previousMenbenrs);
 	}
 
+	private void processChangeAtCluster(List<Address> previousMenbenrs){
+		
+		if(allAtCluster.size() > previousMenbenrs.size()){
+			//foi adicionado
+			for(Address adr : allAtCluster){
+				if(!previousMenbenrs.contains(adr)){
+					//Aplica entrada
+					try {
+						noifyInCluster(adr);
+					} catch (Exception e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+					
+				}
+			}
+			
+		}else{
+			//foi removido
+			
+			for(Address adr : previousMenbenrs){
+				if(!allAtCluster.contains(adr)){
+					//aplica saída
+					notifyOutCluster(adr);
+				}
+			}
+			
+		}
+	}
+	
+	private void noifyInCluster(Address adr) throws Exception{
+		processAcceptedAcess.put(adr, false);
+		sendMessageResquest(adr);
+	}
+	
+	private void notifyOutCluster(Address adr){
+		processAcceptedAcess.remove(adr);
+		tryAccessCriticalRegion(adr, null);
+	}
+	
+	private void fillMapProcessAcceptedAcess(){
+		for(Address adr : allAtCluster)
+			processAcceptedAcess.put(adr, false);
+	}
+	
 	public void receive(Message msg) {
 		
 		RequestCriticalRegion request = (RequestCriticalRegion) msg.getObject();
 		
 		updateLamport(request.getTime());
 		
-		if(!request.getProcessName().equals(name)){			
-//			System.out.println("Name: "+request.getProcessName());
-//			System.out.println("Time: "+request.getTime());
-//			System.out.println("Message: "+request.getType().name());
-			
-			Address src = msg.src();
-			
+		Address src = msg.src();
+		String nameOrigin = request.getProcessName();
+		
+		if(!nameOrigin.equals(name)){			
 			try {
 				processRequest(src, request);
 				
@@ -76,23 +129,26 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 				e.printStackTrace();
 			}
 			
+		}else{
+			tryAccessCriticalRegion(src, nameOrigin);
 		}
 		
 	}
 	
-	
 	public void sendMulticastRequest() throws Exception{
-		updateLamport();
 		if(state == WANTED){
 			System.out.println("Já foi realizado uma requisição anteriormente!");
 			//lançar uma exceção seria melhor aqui
 			return;
 		}
 		
+		updateLamport();
+		
 		RequestCriticalRegion request = new RequestCriticalRegion(name, lamport, REQUEST_IN_CR);
 		Message msg = new Message(null, null, request);
-		channel.send(msg);
+		fillMapProcessAcceptedAcess();
 		state = WANTED;
+		channel.send(msg);
 	}
 	
 	//Utilizado na sincronização entre dois processos
@@ -116,7 +172,7 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 			break;
 			
 		case OK:
-			tryAccessCriticalRegion(src);
+			tryAccessCriticalRegion(src, request.getProcessName());
 			break;
 			
 		default:
@@ -130,7 +186,7 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 		switch (state) {
 		case HELD:
 			//Esse processo está na região critica, logo a requisição será enfieirada
-			enqueueRequest(src);
+			enqueueRequest(request.getProcessName(), src);
 			break;
 
 		case WANTED:
@@ -148,9 +204,9 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 		
 	}
 	
-	private void enqueueRequest(Address src){
+	private void enqueueRequest(String key, Address src){
 		updateLamport();
-		requestsQueue.add(src);
+		requestsQueue.put(key, src);
 	}
 
 	private void sendMessageOk(Address dest) throws Exception{
@@ -161,30 +217,71 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 		channel.send(msg);
 	}
 	
+	private void sendMessageResquest(Address adr) throws Exception{
+		RequestCriticalRegion request = new RequestCriticalRegion(name, lamport, REQUEST_IN_CR);
+		Message msg = new Message(adr, null, request);
+		channel.send(msg);
+	}
+	
 	private void compareLamportTime(Address src, RequestCriticalRegion request) throws Exception{
 		if (request.getTime() > lamport){
 			//enfileira esse processo
-			enqueueRequest(src);
+			enqueueRequest(request.getProcessName(), src);
 		}else{
 			sendMessageOk(src);
 		}
 	}
 	
-	private void tryAccessCriticalRegion(Address src){
+	private void tryAccessCriticalRegion(Address src, String process){
 		updateLamport();
-		requestsQueue.remove(src);
 		
-		if(requestsQueue.isEmpty()){
+		if(process != null){
+			System.out.println("Recebido OK de: "+process);
+			processAcceptedAcess.put(src, true);
+		}	
+		else
+			System.out.println("Um processo saiu do cluster insesperadamente");
+				
+		if(verifyPermissonToAcessCR()){
 			state = HELD;
 			accessCriticalRegion();
 		}
+				
+	}
+	
+	private boolean verifyPermissonToAcessCR(){
 		
+		for (Entry<Address, Boolean> pair : processAcceptedAcess.entrySet()) 
+			if(!pair.getValue())
+				return false;
+			
+		return true;
 	}
 	
 	private void accessCriticalRegion(){
 		Thread tread = new Thread(new CriticalRegionSimulator(this));
 		System.out.println("Acessando região critica!");
 		tread.start();
+	}
+	
+	public void alertFinish() {
+		//Liberado a região critica
+		System.out.println("Saiu da região critica! Liberando filca de requisições...");
+		state = RELEASED;
+			
+		for (Entry<String, Address> pair : requestsQueue.entrySet()){
+			try {
+				sendMessageOk(pair.getValue());
+			} catch (Exception e) {
+		
+				e.printStackTrace();
+				continue;
+			}
+		}
+		
+		
+		requestsQueue.clear();
+		
 	}
 	
 	public String getName() {
@@ -219,36 +316,22 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 		this.lamport = lamport;
 	}
 
-	public List<Address> getRequestsQueue() {
+	public Map<String, Address> getRequestsQueue() {
 		return requestsQueue;
 	}
 
-	public void setRequestsQueue(List<Address> requestsQueue) {
+	public void setRequestsQueue(Map<String, Address> requestsQueue) {
 		this.requestsQueue = requestsQueue;
 	}
 
 	public List<Address> getOthersMenbers() {
-		return othersMenbers;
+		return allAtCluster;
 	}
 
 	public void setOthersMenbers(List<Address> othersMenbers) {
-		this.othersMenbers = othersMenbers;
+		this.allAtCluster = othersMenbers;
 	}
 
-	public void alertFinish() {
-		//Liberado a região critica
-		
-		state = RELEASED;
-			
-		for (Address address : requestsQueue) {
-			try {
-				sendMessageOk(address);
-			} catch (Exception e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-				continue;
-			}
-		}
-	}
+	
 	
 }

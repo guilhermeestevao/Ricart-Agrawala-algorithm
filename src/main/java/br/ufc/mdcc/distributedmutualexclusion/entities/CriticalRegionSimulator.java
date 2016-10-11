@@ -11,7 +11,6 @@ public class CriticalRegionSimulator implements Runnable{
 		this.listener = listener;
 	}
 	
-	
 	public void run() {
 		
 		try {

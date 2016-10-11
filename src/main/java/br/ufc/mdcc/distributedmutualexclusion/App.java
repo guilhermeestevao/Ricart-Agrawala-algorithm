@@ -10,12 +10,12 @@ import org.jgroups.View;
 
 import br.ufc.mdcc.distributedmutualexclusion.entities.Process;
 
-
 /**
- * Hello world!
- *
+ * @author guilhermeestevao
+ * Ricart Agrawala algorithm for distributed mutual exclusion using JGroup
  */
-public class App extends ReceiverAdapter{
+
+public class App{
 	
     public static void main( String[] args ){
     	
