@@ -39,7 +39,8 @@ public class Event {
 		for (String string : OPTIONS) {
 			System.out.println(string);
 		}
-		
+		System.out.print("> "); 
+		System.out.flush();
 		String s = in.readLine();
 		return Integer.parseInt(s);
 	}
