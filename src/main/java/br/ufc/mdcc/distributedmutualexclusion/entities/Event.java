@@ -47,6 +47,9 @@ public class Event {
 	private void showRequestsQueue(){
 		Map<String, Address> queue =  process.getRequestsQueue();
 		
+		if(queue.isEmpty())
+			System.out.println("[LISTA VAZIA]");
+		
 		for(Entry<String, Address> pair : queue.entrySet()){
 			
 			System.out.println("[ "+pair.getKey()+" ] "+pair.getValue());
@@ -89,4 +92,5 @@ public class Event {
 		
 		process.stop();
 	}
+	
 }

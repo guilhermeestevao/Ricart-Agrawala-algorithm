@@ -27,20 +27,22 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 	private JChannel channel;
 	private State state;
 	private int lamport;
+	private int timeAtCR;
 	private Map<String, Address> requestsQueue;
 	private List<Address> allAtCluster;
 	private Map<Address, Boolean> processAcceptedAcess;
 	
-	public Process(String name, String channel) throws Exception{
+	public Process(String name, String channel, int time) throws Exception{
 		this.name = name;
 		this.channel = new JChannel();
 		this.channel.connect(channel);
 		this.channel.setReceiver(this);
 		this.state = RELEASED;
-		lamport = 0;
-		requestsQueue = new HashMap<String, Address>();
-		allAtCluster = this.channel.getView().getMembers();
-		processAcceptedAcess = new HashMap<Address, Boolean>();
+		this.timeAtCR = time;
+		this.lamport = 0;
+		this.requestsQueue = new HashMap<String, Address>();
+		this.allAtCluster = this.channel.getView().getMembers();
+		this.processAcceptedAcess = new HashMap<Address, Boolean>();
 	}
 	
 	public void start() throws Exception{
@@ -118,6 +120,7 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 		updateLamport(request.getTime());
 		
 		Address src = msg.src();
+		
 		String nameOrigin = request.getProcessName();
 		
 		if(!nameOrigin.equals(name)){			
@@ -224,7 +227,7 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 	}
 	
 	private void compareLamportTime(Address src, RequestCriticalRegion request) throws Exception{
-		if (request.getTime() > lamport){
+		if (request.getTime() < lamport){
 			//enfileira esse processo
 			enqueueRequest(request.getProcessName(), src);
 		}else{
@@ -259,14 +262,14 @@ public class Process extends ReceiverAdapter implements AccessCriticalRegionFini
 	}
 	
 	private void accessCriticalRegion(){
-		Thread tread = new Thread(new CriticalRegionSimulator(this));
+		Thread tread = new Thread(new CriticalRegionSimulator(this, timeAtCR));
 		System.out.println("Acessando região critica!");
 		tread.start();
 	}
 	
 	public void alertFinish() {
 		//Liberado a região critica
-		System.out.println("Saiu da região critica! Liberando filca de requisições...");
+		System.out.println("Saiu da região critíca! Liberando fila de requisições...");
 		state = RELEASED;
 			
 		for (Entry<String, Address> pair : requestsQueue.entrySet()){
